@@ -1,0 +1,171 @@
+---
+title: "NYPD Shooting Numbers Compared to Police Officer Work Hours and Population Unemployment Rates"
+author: "Kari Bellew"
+date: "2025-07-21"
+output: pdf_document
+toc: TRUE
+---
+\pagebreak
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("tidyverse")
+library("lubridate")
+library("scales")
+```
+
+# New York City Police Department Shooting Data Analysis
+
+
+# Introduction
+
+This is a project for "DTSA-5301: Data Science as a Field" on Coursera offered by the University of Colorado at Boulder. This project looks at 10 years of NYPD Shooting Data. 
+
+Shootings were trending down until New York declared a COVID-19 state of emergency March 7, 2020. The next 3 years showed a significant spike in shootings. Although things are trending down once again, they are not at pre-pandemic levels. A spike in shootings can be attributed to many different factors. The lock downs may have been just one such factor. 
+
+
+# Shooting Data
+
+NYPD Shooting data is a "...breakdown of every shooting incident that occurred in NYC..." It is provided by the Office of Management Analysis and Planning and posted to the NYPD website. The data period covers years leading up to the pandemic and the years since. 
+
+The first step in processing the data was to cleanse it by formatting date fields as date values and then counting the numbers of incidents. The data will be compared against two data sets. 
+
+```{r read_shooting_data, echo=FALSE}
+Shoot = read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+Shoot$ShootingDate <- mdy(Shoot$OCCUR_DATE)
+
+Shoot$Year <- as.integer(format(as.Date(Shoot$ShootingDate),"%Y"))
+Shoot <- subset(Shoot, select = c(INCIDENT_KEY , ShootingDate, Year))
+
+Shoot <- Shoot %>%
+  filter( Year >= 2015 ) %>%
+  group_by( Year) %>%
+  summarize(Shootings = n() ) %>%
+  ungroup()
+
+"Data Summary ShootingsYear"
+  summary(Shoot)
+```
+
+
+# QUESTION: Did Police Officer Work Hours Impact Rates of Shootings?
+
+During this time frame it was reported that NYC saw officer attrition. Officers may have been off work due to illness or exposure to COVID-19. Did a dip in police officer work hours affect shooting rates?
+
+
+## Police Officer Staffing Data
+
+The first analysis compared the rate of shootings against office staffing levels. This data is available from data.gov (https://catalog.data.gov/dataset/citywide-payroll-data-fiscal-year). The shooting data is grouped by calendar year and the payroll data is grouped by NYC fiscal year, which is July through June rather than January through December. The data was compared calendar year to fiscal year. 
+
+Instead of using head count, a sum of hours worked was used. This was accomplished by summing the total hours (regular plus overtime) grouped for each fiscal year. 
+
+```{r read_staffing_data, echo=FALSE}
+Cops = read_csv("Citywide_Payroll_Data__Fiscal_Year_.csv")
+
+Cops <- as.data.frame(Cops %>%
+   filter(`Agency Name` == 'POLICE DEPARTMENT', `Regular Hours` > 0) %>%
+   group_by(`Fiscal Year`) %>%
+            summarize(HeadCount = n(),
+                    WorkHours = sum(`Regular Hours` + `OT Hours`)
+             ) %>%
+   ungroup()
+  ) 
+
+Cops <- Cops %>%
+  rename(Year = `Fiscal Year`)
+  
+  "Data Summary Cops"
+  summary(Cops)
+```
+
+
+## Visual Comparison of Shooting Incidents with Police Officer Work Hours
+
+This visual shows the number of shootings and the number of police officer work hours. The police officer work hours were divided by 100,000 to adjust units and fit things on one visual. Using this division, the police officer hours worked showed a more steady rate than the shootings. I expected to see the police officer work hours to have an impact on the number of shootings. I was surprised to see that the impact was not what I expected.
+
+```{r Shoot_OfficerStaffing_Visual, echo=FALSE}
+Shoot_OfficerStaffing <- Shoot %>% inner_join(Cops, by=join_by(Year))
+
+Shoot_OfficerStaffing <- as.data.frame(Shoot_OfficerStaffing)
+
+Shoot_OfficerStaffing %>% ggplot() +
+  geom_point(aes(x=Year , y=Shootings, color="Shootings") ) +
+  geom_point(aes(x=Year , y=WorkHours/100000, color="Work Hours / 100,000") ) +
+  theme(axis.text.x =  element_text(angle=45), legend.position = "right") +
+  labs(title = "NYPD Shootings Compared to Police Offier Work Hours", y=NULL) +
+  guides(color = guide_legend(title='' )) +
+  scale_x_continuous(breaks = pretty_breaks()) +
+  scale_y_continuous(labels = comma)
+```
+
+
+## Conclusion
+
+Police Officer work hours did not correlate to Shooting rates.
+
+
+# QUESTION: Do Higher Unemployment Rates Cause More Shootings?
+
+Does the unemployment rate affect the number of shootings? 
+
+
+## Unemployment Data
+
+For this analysis, unemployment data was downloaded from https://www.bls.gov/regions/northeast/data/xg-tables/ro2xglausnyc.htm as "Unemployment Level - Not Seasonally Adjusted". The numbers were not summarized as they are summarized in the source of this data.
+
+```{r read_unemployment_data, echo=FALSE}
+Unemployment = read_csv("BLS_NYC_UnemploymentData.csv")
+
+Unemployment <- Unemployment %>% pivot_longer(
+  cols=c(Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec),
+  names_to='Month',
+  values_to='Rates')
+
+Unemployment <- Unemployment %>% filter(!is.na(Rates))
+
+Unemployment <- as.data.frame(
+  Unemployment %>%
+    group_by(`Year`) %>%
+    summarize(Rates = round(mean(Rates))) %>%
+   ungroup()
+  ) 
+
+"Data Summary"
+  summary(Unemployment)
+```
+
+
+## Visual Comparison of Shooting Incidents with Worker Unemployment Datta
+
+This visual shows the number of shootings in red and the unemployment numbers in blue. The unemployment numbers were divided by 1000 to provide a better comparison with number of shootings. 
+
+The unemployment data shows a strong correlation with number of shootings. I think this happens because people have more time on their hands. People who work a full-time job get up in the morning to go to work and tend to be tired after their work day. When they do not have the job, they have more energy for other things, including getting into trouble. 
+
+The COVID lockdowns also made people angry. Losing their jobs would have made this worse. Overall the unemployment data does show a correlation with the shooting data.
+
+```{r Shoot_Unemployed_Visual, echo=FALSE}
+Shoot_Unemployed <- Shoot %>% inner_join(Unemployment, by=join_by(Year))
+
+Shoot_Unemployed <- as.data.frame(Shoot_Unemployed)
+
+Shoot_Unemployed %>% ggplot() +
+  geom_point(aes(x=Year , y=Shootings, color="Shootings") ) +
+  geom_point(aes(x=Year , y=Rates/100, color="Unemployment Rate / 100") ) +
+  theme(legend.position="right", axis.text.x =  element_text(angle=45)) +
+  labs(title = "NYPD Shootings Compared to Unemployment Rates", x = "Year")  +
+  guides(color = guide_legend(title='' )) +
+  scale_x_continuous(breaks = pretty_breaks()) +
+  scale_y_continuous(labels = comma)
+```
+
+
+## Conclusion
+
+The unemployment data shows a correlation with shooing numbers but a more detailed analysis would be required to find other factors.
+
+# Bias
+
+When I looked at this data, I expected to see a correlation between police officer work hours and the number of shootings. I was surprised that I did not see the correlation. My conclusion that unemployment rates affect the number of shootings is from my personal opinion. Additional analysis of this data could disprove that conclusion.
+
+
+
+

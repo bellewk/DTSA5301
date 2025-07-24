@@ -1,0 +1,414 @@
+---
+title: "COVID-19 Lockdowns and Waste Water Analysis Review"
+author: "Kari Bellew"
+date: "2025-07-25"
+output: pdf_document
+toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("tidyverse")
+library("lubridate")
+library("dplyr")
+#library("stringr")
+```
+\pagebreak
+# Introduction
+This is a project for "DTSA-5301: Data Science as a Field" on Coursera offered by the University of Colorado at Boulder. This project looks at COVID-19 data. 
+
+
+# QUESTION 1: Were COVID Lockdowns Effective at Saving Lives?
+
+This question was investigated using:
+
+* Two different data sets from Data.gov, 
+
+* Pandemic response information by state on Wikipedia (https://en.wikipedia.org/wiki/U.S._state_and_local_government_responses_to_the_COVID-19_pandemic)
+
+* Population data from Data.gov (https://www.census.gov/data/tables/time-series/demo/popest/2020s-state-total.html).
+
+I arbitrarily picked states that had strict policies and states that had more relaxed policies. This method ignores factors such as population density, weather, and mobility of population (how often people went from one place to another).
+
+The data was reported at different intervals and states had differing reporting timelines. To help quash differences this caused in numbers, I summarized counts to quarterly. Even with that, the data should not be compared on the same timelines state-to-state because the disease moved through our nation rather than hitting every place at the same time with the same intensity.
+
+
+## State Lockdown information
+
+* California issued a stay-at-home order in mid-March of 2020 and did not lift it.
+
+* Oregon issued a stay-at-home order in mid-March of 2020 and did not lift it.
+
+* Texas issued a stay-at-home order in mid-March of 2020 and lifted it April 30.
+
+* Wisconsin declared a stay-at-home order to be unconstitutional and, therefore, did not issue such an order. 
+
+The states have widely varying populations. Death rates were divided by population in an effort to modulate the numbers. 
+
+This approach ignores things like "Most employers switched to work-from-home regardless of the employee state of residence."
+
+## Population Information
+
+```{r populationTable, echo=FALSE, , warnings=FALSE, results='asis'}
+popTabl<-"
+State  | Population
+------|-----
+California | 39,555,674 |
+Oregon | 4,237,224 |
+Texas | 29,149,458 |
+Wisconsin | 5,894,170 |
+"
+cat(popTabl)
+```
+
+
+```{r populationVariables, echo=FALSE}
+CaliforniaPop = 39555674
+OregonPop = 4237224
+TexasPop = 29149458
+WisconsinPop = 5894170
+```
+
+
+## Dataset: Provisional Death Counts for Influenza, Pneumonia, and COVID-19
+
+### Data description
+
+Provided by the U.S. Department of Health & Human Services.
+
+
+Description from the Data.gov web site:
+
+"Deaths counts for influenza, pneumonia, and COVID-19 reported to NCHS by week ending date, by state and HHS region, and age group."
+
+### Analysis
+
+#### Load the data.
+```{r load_IPC, echo=FALSE}
+IPC = read_csv("https://data.cdc.gov/api/views/ynw2-4viq/rows.csv?accessType=DOWNLOAD")
+```
+
+
+#### Wrangle the Data
+  * Cleanse dates.
+  * Extract Year_Quarter from dates.
+  * Replace NA values with 0s.
+  
+```{r dataWrangling_IPC, echo=FALSE}
+IPC <- IPC %>% mutate(Quarter = case_when(
+  IPC$MMWRweek     > 39 ~ 4,
+  IPC$MMWRweek     > 26 ~ 3,
+  IPC$MMWRweek     > 13 ~ 2,
+  IPC$MMWRweek     > 0 ~ 1
+  ))
+
+IPC$Year_Quarter <- str_c(IPC$MMWRyear, sep="_", IPC$Quarter)
+
+IPC$`COVID-19 Deaths`  <- replace_na(IPC$`COVID-19 Deaths`, 0)
+
+IPC <- IPC %>%
+  select(Jurisdiction,MMWRyear,Year_Quarter,`COVID-19 Deaths`) %>%
+  rename(Year = MMWRyear, Deaths = `COVID-19 Deaths`)
+
+summary(IPC)
+```
+
+
+#### Extract Data for States
+* Extract data for states.
+* Sum data per Year_Quarter.
+
+```{r dataWork_IPC, echo=FALSE}
+IPC <- IPC %>%
+  filter( Jurisdiction %in% c('California','Oregon','Wisconsin','Texas' )) %>%
+  select(
+    Year_Quarter,
+    Year,
+    Jurisdiction,
+    Deaths
+) 
+
+IPC <- IPC %>%
+  rename(State = Jurisdiction)
+
+IPC <- IPC %>%
+  group_by(Year_Quarter, State) %>%
+  filter(Year > 0) %>%
+  summarize(
+    Deaths = sum(Deaths)
+  ) %>%
+  ungroup()
+
+IPC <- IPC %>% mutate(Deaths = case_when(
+  IPC$State == "California" ~ IPC$Deaths / CaliforniaPop,
+  IPC$State == "Oregon" ~ IPC$Deaths / OregonPop,
+  IPC$State == "Texas" ~ IPC$Deaths / TexasPop,
+  IPC$State == "Wisconsin" ~ IPC$Deaths / WisconsinPop
+  ))
+  
+```
+
+
+#### Visualization
+
+```{r visualize_IPC, echo=FALSE}
+IPC %>% ggplot() + aes(x=Year_Quarter, y=Deaths, color=State, fill=State, shape=State) +
+  geom_point() +
+  scale_color_manual(values = c("California" = "blue",
+                                "Oregon" = "darkgreen",
+                                "Texas"="purple",
+                                "Wisconsin"="red"))  +
+  theme(axis.text.x =  element_text(angle=45), legend.position = "right") +
+  labs(title = "State Comparison - Dataset 1", x = "Year_Quarter", y = "Deaths") 
+```
+
+
+### Conclusion
+
+This data set shows some evidence that the tight policies, such as lock downs, saved large numbers of lives. 
+
+The data visualization shows spikes in deaths in March and April of 20202 for all states. Lock downs were issued in March of 2020. After Texas reopened it had a spike in deaths that was not seen in states with lock downs. Wisconsin numbers were similar to Texas for quarters 2-4 in 2021. The first vaccine was available at the end of 20202 and numbers leveled out and rates were similar across all states regardless of lockdown policy.
+
+
+## Dataset: Provisional COVID-19 death counts, rates, and percent of total deaths, by jurisdiction of residence
+
+### Data description
+
+Provided by the U.S. Department of Health & Human Services.
+
+
+Description from the Data.gov web site:
+
+"This file contains COVID-19 death counts, death rates, and percent of total deaths by jurisdiction of residence. The data is grouped by different time periods including 3-month period, weekly, and total (cumulative since January 1, 2020). United States death counts and rates include the 50 states, plus the District of Columbia and New York City. New York state estimates exclude New York City. Puerto Rico is included in HHS Region 2 estimates.
+
+"Deaths with confirmed or presumed COVID-19, coded to ICD–10 code U07.1. Number of deaths reported in this file are the total number of COVID-19 deaths received and coded as of the date of analysis and may not represent all deaths that occurred in that period. Counts of deaths occurring before or after the reporting period are not included in the file.
+
+"Data during recent periods are incomplete because of the lag in time between when the death occurred and when the death certificate is completed, submitted to NCHS and processed for reporting purposes. This delay can range from 1 week to 8 weeks or more, depending on the jurisdiction and cause of death.
+
+"Death counts should not be compared across states. Data timeliness varies by state. Some states report deaths on a daily basis, while other states report deaths weekly or monthly.
+
+"The ten (10) United States Department of Health and Human Services (HHS) regions include the following jurisdictions. Region 1: Connecticut, Maine, Massachusetts, New Hampshire, Rhode Island, Vermont; Region 2: New Jersey, New York, New York City, Puerto Rico; Region 3: Delaware, District of Columbia, Maryland, Pennsylvania, Virginia, West Virginia; Region 4: Alabama, Florida, Georgia, Kentucky, Mississippi, North Carolina, South Carolina, Tennessee; Region 5: Illinois, Indiana, Michigan, Minnesota, Ohio, Wisconsin; Region 6: Arkansas, Louisiana, New Mexico, Oklahoma, Texas; Region 7: Iowa, Kansas, Missouri, Nebraska; Region 8: Colorado, Montana, North Dakota, South Dakota, Utah, Wyoming; Region 9: Arizona, California, Hawaii, Nevada; Region 10: Alaska, Idaho, Oregon, Washington.
+
+"Rates were calculated using the population estimates for 2021, which are estimated as of July 1, 2021 based on the Blended Base produced by the US Census Bureau in lieu of the April 1, 2020 decennial population count. The Blended Base consists of the blend of Vintage 2020 postcensal population estimates, 2020 Demographic Analysis Estimates, and 2020 Census PL 94-171 Redistricting File (see https://www2.census.gov/programs-surveys/popest/technical-documentation/methodology/2020-2021/methods-statement-v2021.pdf).
+
+"Rates are based on deaths occurring in the specified week/month and are age-adjusted to the 2000 standard population using the direct method (see https://www.cdc.gov/nchs/data/nvsr/nvsr70/nvsr70-08-508.pdf). These rates differ from annual age-adjusted rates, typically presented in NCHS publications based on a full year of data and annualized weekly/monthly age-adjusted rates which have been adjusted to allow comparison with annual rates. Annualization rates presents deaths per year per 100,000 population that would be expected in a year if the observed period specific (weekly/monthly) rate prevailed for a full year.
+
+"Sub-national death counts between 1-9 are suppressed in accordance with NCHS data confidentiality standards. Rates based on death counts less than 20 are suppressed in accordance with NCHS standards of reliability as specified in NCHS Data Presentation Standards for Proportions (available from: https://www.cdc.gov/nchs/data/series/sr_02/sr02_175.pdf.)."
+
+
+### Analysis
+
+#### Load the data
+
+```{r read_COVIDonly, echo=FALSE}
+CO = read_csv("https://data.cdc.gov/api/views/mpx5-t7tu/rows.csv?accessType=DOWNLOAD")
+summary(CO)
+```
+
+
+#### Wrangle the Data
+  * Cleanse dates.
+  * Extract Year_Quarter from dates.
+  * Replace NA values with 0s.
+  
+```{r dataWrangling_CO, echo=FALSE}
+CO <- CO %>%
+ filter(Group == 'weekly') %>%
+ select( -c(data_as_of, footnote, Group, data_period_start ) )
+
+CO$Year <- as.integer(format(as.Date(CO$data_period_end , format="%m/%d/%Y"),"%Y"))
+CO$Month <- as.integer(format(as.Date(CO$data_period_end, format="%m/%d/%Y"),"%m"))
+
+CO <- CO %>% mutate(Quarter = case_when(
+  CO$Month > 9 ~ 4,
+  CO$Month > 6 ~ 3,
+  CO$Month > 3 ~ 2,
+  CO$Month > 0 ~ 1
+  ))
+
+CO$Year_Quarter <- str_c(CO$Year, sep="_", CO$Quarter)
+
+CO$COVID_deaths  <- replace_na(CO$COVID_deaths, 0)
+```
+
+
+#### Extract data for states
+
+```{r dataWork_CO, echo=FALSE}
+COsubset <- CO %>%
+  filter( Jurisdiction_Residence  %in% c('California','Oregon','Wisconsin','Texas' )) %>%
+  select(
+    Year_Quarter,
+    Year,
+    Quarter,
+    Jurisdiction_Residence ,
+    COVID_deaths
+) 
+
+COsubset <- COsubset %>%
+  rename(State = Jurisdiction_Residence )
+
+COsubset <- COsubset %>%
+  group_by(Year_Quarter, State) %>%
+  filter(Year > 0) %>%
+  summarize(
+    Deaths = sum(COVID_deaths)
+  ) %>%
+  ungroup()
+
+COsubset <- COsubset %>% mutate(Deaths = case_when(
+  COsubset$State == "California" ~ COsubset$Deaths / CaliforniaPop,
+  COsubset$State == "Oregon" ~ COsubset$Deaths / OregonPop,
+  COsubset$State == "Texas" ~ COsubset$Deaths / TexasPop,
+  COsubset$State == "Wisconsin" ~ COsubset$Deaths / WisconsinPop
+  ))
+```
+
+
+#### Visualization
+
+```{r visualize_subset1, echo=FALSE}
+COsubset %>% 
+  ggplot() + aes(x=Year_Quarter, y=Deaths, color=State, fill=State, shape=State) +
+  geom_point() +
+  scale_color_manual(values = c("California" = "blue",
+                                "Oregon" = "darkgreen",
+                                "Texas"="purple",
+                                "Wisconsin"="red"))  +
+  theme(axis.text.x =  element_text(angle=45), legend.position = "right") +
+  labs(title = "State Comparison - Dataset 2", x = "Year_Quarter", y = "Deaths")
+
+```
+
+
+### Conclusion
+
+This data set shows convincing evidence that the tight policies, such as lock downs, saved large numbers of lives. The data visualization shows in the comparison of these four statest that Texas had the highest death rates throughout the pandemic and Wisconsin had the second highest after 2021.
+
+
+\pagebreak
+# QUESTION 2: Is Testing Waste Water for COVID an Effective Method to Predict Active Cases?
+
+## Dataset: COVID-19 National Wastewater Data
+
+### Data description:
+
+Provided by the CDC. (https://www.cdc.gov/nwss/rv/COVID19-statetrend.html)
+
+
+Excerpt of description from the CDC web site
+
+"Wastewater monitoring can detect viruses spreading from one person to another within a community earlier than clinical testing and before people who are sick go to their doctor or hospital. It can also detect infections without symptoms. If you see increased wastewater viral activity levels, it might indicate that there is a higher risk of infection. See how to protect yourself from respiratory viruses.
+
+"About the Wastewater Viral Activity Level: The wastewater viral activity level indicates whether the amount of virus in the wastewater is very low, low, moderate, high, or very high. The wastewater viral activity levels may indicate the risk of infection in an area. The wastewater viral activity levels are categorized as follows:
+
+* "Up to 1.5 – Very Low
+* "Greater than 1.5 and up to 3 – Low
+* "Greater than 3 and up to 4.5 – Moderate
+* "Greater than 4.5 and up to 8 – High
+* "Greater than 8 – Very High"
+
+
+### Analysis
+
+#### Load the data
+```{r load_OR_WW, echo=FALSE}
+ww <- read_csv("https://www.cdc.gov/wcms/vizdata/NCEZID_DIDRI/SC2/nwsssc2stateactivitylevelDL.csv")
+```
+
+#### Wrangle the Data
+
+* Cleanse dates.
+* Extract Year_Quarter from dates.
+* Average rate data by Year_Quarter.
+
+```{r oregon_wastwaterData, echo=FALSE}
+ww <- ww %>%
+ filter(
+   `State/Territory` == 'Oregon', 
+   Data_Collection_Period == 'All Results') %>%
+ select(Week_Ending_Date, `State/Territory_WVAL`,National_WVAL, Regional_WVAL, WVAL_Category) %>%
+ rename(State_WVAL = `State/Territory_WVAL`)
+ 
+ww$Week <- as.integer(format(as.Date(ww$Week_Ending_Date),"%U"))
+ww$Year <- as.integer(format(as.Date(ww$Week_Ending_Date),"%Y"))
+ 
+ww <- ww %>% mutate(Quarter = case_when(
+  ww$Week     > 39 ~ 4,
+  ww$Week     > 26 ~ 3,
+  ww$Week     > 13 ~ 2,
+  TRUE        ~ 1
+  ))
+
+ww$Year_Quarter <- str_c(ww$Year , sep="_", ww$Quarter)
+
+ww <- ww %>%
+  group_by(Year_Quarter) %>%
+  summarize(
+    State_WVAL = mean(State_WVAL),
+    National_WVAL = mean(National_WVAL),
+    Regional_WVAL = mean(Regional_WVAL)
+  ) %>%
+  ungroup()
+
+summary(ww)
+
+```
+
+#### Extract and wrangle Oregon case data from the "Provisional COVID-19 death counts, rates, and percent of total deaths, by jurisdiction of residence" data already loaded
+* Cleanse dates.
+* Extract Year_Quarter from dates.
+* Average COVID case rate.
+
+```{r OregonCases, echo=FALSE}
+OregonCases <- CO %>%
+ filter(Jurisdiction_Residence == 'Oregon') %>%
+ select(data_period_end, crude_COVID_rate)
+ 
+OregonCases$Year <- as.integer(format(as.Date(OregonCases$data_period_end , format="%m/%d/%Y"),"%Y"))
+OregonCases$Week <- format(format(as.Date(OregonCases$data_period_end , format="%m/%d/%Y"),"%U"))
+
+OregonCases <- OregonCases %>% mutate(Quarter = case_when(
+  OregonCases$Week     > 39 ~ 4,
+  OregonCases$Week     > 26 ~ 3,
+  OregonCases$Week     > 13 ~ 2,
+  TRUE        ~ 1
+  ))
+
+OregonCases$Year_Quarter <- str_c(OregonCases$Year, sep="_", OregonCases$Quarter)
+
+OregonCases$crude_COVID_rate <- OregonCases$crude_COVID_rate - lag(OregonCases$crude_COVID_rate)
+
+OregonCases$crude_COVID_rate  <- replace_na(OregonCases$crude_COVID_rate, 0)
+  
+OregonCases <- OregonCases %>%
+  group_by(Year_Quarter) %>%
+  summarize(
+    crude_COVID_rate = mean(crude_COVID_rate, na.rm=TRUE) * 100
+  ) %>%
+  ungroup()
+
+ summary(OregonCases)
+```
+
+
+#### Visualization
+
+```{r wwCases_Visual, echo=FALSE}
+ww %>% 
+ inner_join(OregonCases, by=join_by(Year_Quarter)) %>%
+ ggplot(aes(x=Year_Quarter, )) +
+ geom_point(aes(y=State_WVAL, color="Oregon WVAL")) +
+ geom_point(aes(y=crude_COVID_rate, color="Oregon COVID Rate")) +
+ theme(axis.text.x = element_text(angle=45), legend.position = "right") +
+ labs(title="Waste Water COVID-19 :: Cases: Oregon (x100)", y="Rates") +
+ guides(color = guide_legend(title='' ))
+ 
+```
+
+
+### Conclusion
+
+The waste water contamination rate does not match the number of reported cases. It would seem that waste water is not a good indicator of the number of cases. We are seeing symptoms decrease in severity so that infected people have little or no symptoms and, therefore, cases are not reported. This data on its own seems to indicate that waste water is not a good measure. The waste water data without disease symptom or severity information definitely has less value that it would have if it included these things.
+
+
