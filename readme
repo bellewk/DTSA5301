@@ -1,0 +1,1 @@
+My NYPD shooting analysis involved unemployment data. I had trouble finding a reliable source. I manually downloaded a file. It is in the repository as BLS_NYC_UnemploymentData.csv. It must be in your R Studio home directory in order to knit the .rmd.
